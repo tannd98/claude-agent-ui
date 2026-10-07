@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Claude Agent UI">
+  <!-- The same "run green" dot the sidebar wordmark carries, on the dark surface token. -->
+  <rect width="32" height="32" rx="6" fill="#1b2336" />
+  <circle cx="16" cy="16" r="6" fill="#22c55e" />
+</svg>

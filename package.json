@@ -1,0 +1,68 @@
+{
+  "name": "claude-agent-ui",
+  "version": "0.3.0",
+  "type": "module",
+  "description": "Local web UI to browse, edit, schedule and run Claude Code agents as background sessions",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "agents",
+    "ui",
+    "local"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tannd98/claude-agent-ui.git"
+  },
+  "homepage": "https://github.com/tannd98/claude-agent-ui#readme",
+  "bugs": {
+    "url": "https://github.com/tannd98/claude-agent-ui/issues"
+  },
+  "bin": {
+    "claude-agent-ui": "dist/cli.js"
+  },
+  "main": "dist/server.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "tsup",
+    "build:web": "npm --prefix web run build",
+    "start": "tsx src/cli.ts",
+    "dev": "tsx watch src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:smoke": "node test/smoke/packedTarball.mjs",
+    "web:install": "npm --prefix web install",
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
+    "web:test": "npm --prefix web test",
+    "prepublishOnly": "npm run typecheck && npm test && npm run web:test && npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "croner": "^10.0.1",
+    "express": "^5.2.1",
+    "open": "^10.2.0",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.10.0",
+    "playwright": "^1.63.0",
+    "prettier": "^3.4.2",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  },
+  "allowScripts": {
+    "esbuild@0.27.7": true,
+    "esbuild@0.28.2": true
+  }
+}

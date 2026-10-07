@@ -1,0 +1,435 @@
+/*
+ * Design tokens for claude-agent-ui.
+ *
+ * Three layers, in this order, and nothing skips a layer:
+ *
+ *   1. PRIMITIVE  raw values with no meaning. Named for what they are (--slate-900), never
+ *                 for where they are used. Identical in every theme.
+ *   2. SEMANTIC   purpose aliases (--color-bg, --color-fg-muted, --status-running-fg). This is
+ *                 the only layer a theme redefines, which is why dark mode is a token swap and
+ *                 not a second stylesheet.
+ *   3. COMPONENT  per-component knobs (--sidebar-item-fg-active). Always resolve to a semantic
+ *                 token, never to a primitive and never to a literal.
+ *
+ * Rule for every component in this app: use layer 2 or layer 3. A raw hex, a stray px gap or a
+ * one-off radius in a .tsx file is a bug — if the token you need is missing, add it here.
+ *
+ * Catalog provenance (ui-ux-pro-max):
+ *   palette   colors.csv No. 81  "Developer Tool / IDE"  — code dark + run green
+ *   pairing   typography.csv No. 9  "Developer Mono"     — JetBrains Mono + IBM Plex Sans
+ *   style     styles.csv No. 1  minimalism-and-swiss-style, density dial 8 (dense/dashboard)
+ */
+
+/* ========================================================================================
+ * LAYER 1 — PRIMITIVE
+ * Theme-independent. Never referenced directly by a component.
+ * ===================================================================================== */
+
+:root {
+  /* --- Colour ramps ------------------------------------------------------------------ */
+  /* Slate. The palette's neutrals (#0F172A / #1B2336 / #272F42 / #475569 / #94A3B8 / #F8FAFC)
+     sit on this ramp; the in-between steps are the standard Tailwind slate scale so the light
+     theme can be derived from the same ramp instead of inventing a second set of greys. */
+  --slate-50: #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1;
+  --slate-400: #94a3b8;
+  /* Off-ramp step. Slate 500 is the natural "subtle" grey but only reaches 2.8:1 on the dark
+     theme's selected surface; this clears 3:1 everywhere (ux-guidelines No. 36). */
+  --slate-450: #7c8aa3;
+  --slate-500: #64748b;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-750: #272f42;
+  --slate-800: #1e293b;
+  --slate-850: #1b2336;
+  --slate-900: #0f172a;
+  --slate-950: #020617;
+  --white: #ffffff;
+  --black: #000000;
+
+  /* Green — "run green". The accent and the running status. */
+  --green-300: #86efac;
+  --green-400: #4ade80;
+  --green-500: #22c55e;
+  --green-600: #16a34a;
+  --green-700: #15803d;
+  --green-800: #166534;
+
+  /* Red — destructive and failed. */
+  --red-300: #fca5a5;
+  --red-400: #f87171;
+  --red-500: #ef4444;
+  --red-600: #dc2626;
+  --red-700: #b91c1c;
+
+  /* Amber — queued and warning. */
+  --amber-300: #fcd34d;
+  --amber-400: #fbbf24;
+  --amber-500: #f59e0b;
+  --amber-600: #d97706;
+  --amber-700: #b45309;
+  --amber-800: #92400e;
+
+  /* Blue — informational and scheduled. */
+  --blue-300: #93c5fd;
+  --blue-400: #60a5fa;
+  --blue-500: #3b82f6;
+  --blue-600: #2563eb;
+  --blue-700: #1d4ed8;
+
+  /* --- Spacing -----------------------------------------------------------------------
+     4px grid, density dial 8 (dense/dashboard). Every gap, pad and inset in the app comes
+     from this scale. There is deliberately no 7px, no 10px and no 18px. */
+  --space-0: 0px;
+  --space-px: 1px;
+  --space-1: 0.25rem; /*  4px */
+  --space-2: 0.5rem; /*  8px */
+  --space-3: 0.75rem; /* 12px */
+  --space-4: 1rem; /* 16px */
+  --space-5: 1.25rem; /* 20px */
+  --space-6: 1.5rem; /* 24px */
+  --space-8: 2rem; /* 32px */
+  --space-10: 2.5rem; /* 40px */
+  --space-12: 3rem; /* 48px */
+  --space-16: 4rem; /* 64px */
+
+  /* --- Radius ------------------------------------------------------------------------
+     styles.csv No. 1 specifies 0px. Deliberate override: a 2/4/6 scale keeps the Swiss
+     crispness at console density without reading as unfinished next to Radix primitives. */
+  --radius-none: 0px;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-full: 9999px;
+
+  /* --- Typography --------------------------------------------------------------------
+     Two families, three weights, six sizes. A size outside this list is a bug. */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --text-2xs: 0.6875rem; /* 11px — table micro-labels, status bar */
+  --text-xs: 0.75rem; /* 12px — labels, metadata, badges */
+  --text-sm: 0.8125rem; /* 13px — table body, the app's workhorse size */
+  --text-base: 0.875rem; /* 14px — prose and form controls */
+  --text-lg: 1rem; /* 16px — section headings */
+  --text-xl: 1.25rem; /* 20px — page titles */
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.6;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --tracking-wide: 0.04em; /* uppercase micro-labels only */
+
+  /* --- Elevation ---------------------------------------------------------------------
+     Swiss style: sharp and shallow. Overlays get the only real shadow. */
+  --shadow-none: none;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.16);
+  --shadow-overlay: 0 16px 48px -12px rgb(0 0 0 / 0.45);
+
+  /* --- Motion ------------------------------------------------------------------------
+     Motion dial 2 (subtle). Hover 150ms, state change 200ms, overlay 250ms. */
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-slow: 250ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* --- Layout ------------------------------------------------------------------------ */
+  --sidebar-width: 15rem; /* 240px */
+  /* Below `md` the sidebar drops its labels and becomes an icon rail, so a 390px viewport
+     still has a usable content column instead of a horizontally clipped one. */
+  --sidebar-width-collapsed: 3.25rem; /* 52px */
+  --statusbar-height: 1.75rem; /* 28px */
+  --topbar-height: 3rem; /* 48px */
+  /* Wide enough for the longest status label ("Waiting — may need input"), so a row changing
+     state does not reflow the table mid-scan — ux-guidelines No. 19 (Content Jumping). */
+  --status-col-width: 13.5rem; /* 216px */
+  --task-row-height: 2.25rem; /* 36px — the skeleton reserves exactly this */
+
+  --z-overlay: 50;
+  --z-statusbar: 30;
+}
+
+/* ========================================================================================
+ * LAYER 2 — SEMANTIC (dark)
+ * The default. A user with no stored preference and no OS preference gets this.
+ * ===================================================================================== */
+
+:root,
+:root[data-theme="dark"] {
+  /* Surfaces, back to front */
+  --color-bg: var(--slate-900);
+  --color-surface: var(--slate-850);
+  --color-surface-raised: var(--slate-800);
+  --color-surface-sunken: var(--slate-950);
+  --color-surface-hover: var(--slate-800);
+  --color-surface-selected: var(--slate-750);
+
+  /* Text, strongest to weakest */
+  --color-fg: var(--slate-50);
+  --color-fg-muted: var(--slate-400);
+  --color-fg-subtle: var(--slate-450);
+  --color-fg-on-accent: var(--slate-900);
+  /* Near-black, matching the palette's "On Destructive: #000000". White on red-500 is only
+     3.8:1; the dark text clears 5.6:1 and matches the dark-on-accent treatment next to it. */
+  --color-fg-on-danger: var(--black);
+
+  /* Lines */
+  --color-border: var(--slate-700);
+  --color-border-strong: var(--slate-600);
+
+  /* Accent — the one colour that means "act" or "live" */
+  --color-accent: var(--green-500);
+  --color-accent-hover: var(--green-400);
+  --color-accent-fg: var(--green-400);
+  --color-accent-quiet: color-mix(in oklab, var(--green-500) 16%, transparent);
+
+  /* Danger */
+  --color-danger: var(--red-500);
+  --color-danger-hover: var(--red-400);
+  --color-danger-fg: var(--red-400);
+  --color-danger-quiet: color-mix(in oklab, var(--red-500) 16%, transparent);
+
+  /* Focus. High contrast against every surface above — ux-guidelines No. 28 / No. 102. */
+  --color-focus-ring: var(--slate-50);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  /* Status. Each pair is foreground-on-quiet-background and is always paired with a text
+     label in the UI — ux-guidelines No. 37, never colour alone. */
+  --status-running-fg: var(--green-400);
+  --status-running-bg: color-mix(in oklab, var(--green-500) 18%, transparent);
+  /* Amber is the loudest non-error hue in the set, so it means exactly one thing: a human is
+     needed here. `waiting` and `blocked` both alias it; they are told apart by label, icon and
+     which group of the table they sit in, which is how every state in this app is told apart. */
+  --status-attention-fg: var(--amber-400);
+  --status-attention-bg: color-mix(in oklab, var(--amber-500) 18%, transparent);
+  --status-waiting-fg: var(--status-attention-fg);
+  --status-waiting-bg: var(--status-attention-bg);
+  --status-blocked-fg: var(--status-attention-fg);
+  --status-blocked-bg: var(--status-attention-bg);
+  /* Queued joins the blue "pending" family rather than amber. At concurrency 2 a backlog is the
+     normal majority, and thirty amber rows would drown the one task parked on a permission
+     prompt — which inverts the hierarchy this screen exists to show. A queued task needs
+     nothing from anybody, so it must not out-shout one that does. */
+  /* blue-300, not blue-400: on a *selected* table row the tint sits over a lighter surface and
+     blue-400 falls to 4.20:1. Queued and Scheduled therefore share a hue, which is the same
+     arrangement `waiting` and `blocked` already have — they are told apart by their label and
+     their icon, which is how every state in this app is told apart. */
+  --status-queued-fg: var(--blue-300);
+  --status-queued-bg: color-mix(in oklab, var(--blue-500) 18%, transparent);
+  --status-scheduled-fg: var(--blue-300);
+  --status-scheduled-bg: color-mix(in oklab, var(--blue-500) 18%, transparent);
+  --status-finished-fg: var(--slate-300);
+  --status-finished-bg: color-mix(in oklab, var(--slate-400) 18%, transparent);
+  --status-failed-fg: var(--red-300);
+  --status-failed-bg: color-mix(in oklab, var(--red-500) 18%, transparent);
+  --status-idle-fg: var(--slate-300);
+  --status-idle-bg: color-mix(in oklab, var(--slate-500) 16%, transparent);
+
+  --color-overlay-scrim: rgb(2 6 23 / 0.7);
+  --color-shadow: var(--shadow-sm);
+}
+
+/* ========================================================================================
+ * LAYER 2 — SEMANTIC (light)
+ * Same primitives, re-aliased. Not one extra colour, not one extra rule elsewhere.
+ * ===================================================================================== */
+
+:root[data-theme="light"] {
+  --color-bg: var(--white);
+  --color-surface: var(--slate-50);
+  --color-surface-raised: var(--white);
+  --color-surface-sunken: var(--slate-100);
+  --color-surface-hover: var(--slate-100);
+  --color-surface-selected: var(--slate-200);
+
+  --color-fg: var(--slate-900);
+  --color-fg-muted: var(--slate-600);
+  --color-fg-subtle: var(--slate-500);
+  --color-fg-on-accent: var(--white);
+  --color-fg-on-danger: var(--white);
+
+  --color-border: var(--slate-300);
+  --color-border-strong: var(--slate-400);
+
+  /* The palette's #22C55E is only 1.9:1 on white, so light mode steps down the ramp for
+     anything that carries text or an icon — ux-guidelines No. 36. */
+  --color-accent: var(--green-700);
+  --color-accent-hover: var(--green-800);
+  --color-accent-fg: var(--green-800);
+  --color-accent-quiet: color-mix(in oklab, var(--green-600) 12%, transparent);
+
+  --color-danger: var(--red-600);
+  --color-danger-hover: var(--red-700);
+  --color-danger-fg: var(--red-700);
+  --color-danger-quiet: color-mix(in oklab, var(--red-600) 10%, transparent);
+
+  --color-focus-ring: var(--slate-900);
+
+  /* A badge's text sits on a tinted background rather than on the page, so light mode drops
+     one more step down the ramp than the plain accent/danger text does. */
+  --status-running-fg: var(--green-800);
+  --status-running-bg: color-mix(in oklab, var(--green-600) 14%, transparent);
+  --status-attention-fg: var(--amber-800);
+  --status-attention-bg: color-mix(in oklab, var(--amber-500) 20%, transparent);
+  --status-waiting-fg: var(--status-attention-fg);
+  --status-waiting-bg: var(--status-attention-bg);
+  --status-blocked-fg: var(--status-attention-fg);
+  --status-blocked-bg: var(--status-attention-bg);
+  --status-queued-fg: var(--blue-700);
+  --status-queued-bg: color-mix(in oklab, var(--blue-500) 14%, transparent);
+  --status-scheduled-fg: var(--blue-700);
+  --status-scheduled-bg: color-mix(in oklab, var(--blue-500) 14%, transparent);
+  --status-finished-fg: var(--slate-600);
+  --status-finished-bg: color-mix(in oklab, var(--slate-500) 14%, transparent);
+  --status-failed-fg: var(--red-700);
+  --status-failed-bg: color-mix(in oklab, var(--red-600) 10%, transparent);
+  --status-idle-fg: var(--slate-600);
+  --status-idle-bg: color-mix(in oklab, var(--slate-500) 12%, transparent);
+
+  --color-overlay-scrim: rgb(15 23 42 / 0.4);
+  --color-shadow: var(--shadow-sm);
+}
+
+/* ========================================================================================
+ * LAYER 3 — COMPONENT
+ * Theme-independent: every value here resolves through layer 2, so both themes are covered
+ * by one definition. A component token exists when a component needs to vary independently
+ * of its surface — otherwise the component uses the semantic token directly.
+ * ===================================================================================== */
+
+:root {
+  /* Sidebar */
+  --sidebar-bg: var(--color-surface);
+  --sidebar-border: var(--color-border);
+  --sidebar-item-fg: var(--color-fg-muted);
+  --sidebar-item-fg-hover: var(--color-fg);
+  --sidebar-item-fg-active: var(--color-fg);
+  --sidebar-item-bg-hover: var(--color-surface-hover);
+  --sidebar-item-bg-active: var(--color-surface-selected);
+  --sidebar-item-marker-active: var(--color-accent);
+  --sidebar-item-height: var(--space-8);
+
+  /* Status bar */
+  --statusbar-bg: var(--color-surface);
+  --statusbar-border: var(--color-border);
+  --statusbar-fg: var(--color-fg-muted);
+  --statusbar-fg-strong: var(--color-fg);
+
+  /* Data table */
+  /* The hanging indent for a row's secondary lines, so they align under the *title* rather
+     than under the chevron that precedes it. It is the chevron's width (--space-3) plus the
+     gap beside it (half of --space-3) — a token rather than a literal because four rows in
+     two tables need the same answer, and one of them drifting to 18px would misalign the
+     column with nothing failing to say so. */
+  --row-text-indent: 1.125rem;
+  --table-header-bg: var(--color-surface);
+  --table-header-fg: var(--color-fg-muted);
+  --table-row-bg-hover: var(--color-surface-hover);
+  --table-row-bg-selected: var(--color-surface-selected);
+  --table-border: var(--color-border);
+  --table-cell-pad-x: var(--space-3);
+  --table-cell-pad-y: var(--space-2);
+
+  /* Badge */
+  --badge-radius: var(--radius-sm);
+  --badge-pad-x: var(--space-2);
+  --badge-pad-y: var(--space-px);
+
+  /* Scope badge. Outlined and neutral on purpose: hue is reserved for state, so a scope is told
+     apart by its word and its icon rather than by a colour that would compete with a status. */
+  --scope-badge-fg: var(--color-fg-muted);
+  --scope-badge-bg: transparent;
+  --scope-badge-border: var(--color-border);
+
+  /* Definition editor. The file is the content, so it gets the sunken field surface and the
+     mono family; the chrome around it stays on the page surface. */
+  --editor-bg: var(--color-surface-sunken);
+  --editor-fg: var(--color-fg);
+  --editor-border: var(--color-border);
+  --editor-pad: var(--space-4);
+  --editor-leading: var(--leading-relaxed);
+  /* Field errors and the read-only explanation. Both are persistent strips, never toasts:
+     a problem with the file on disk does not stop being true after four seconds.
+
+     The foreground is the `failed` status pair rather than plain `--color-danger-fg`, for the
+     reason that pair exists: this text sits on a tinted background, not on the page, and
+     danger-fg only reaches 4.21:1 once the tint is flattened over a selected surface. The
+     border stays on --color-danger, which is non-text and only needs 3:1. */
+  --field-error-fg: var(--status-failed-fg);
+  --field-error-bg: var(--status-failed-bg);
+  --field-error-border: var(--color-danger);
+  --readonly-fg: var(--color-fg-muted);
+  --readonly-bg: var(--color-surface-raised);
+  --readonly-border: var(--color-border-strong);
+
+  /* Button */
+  --button-radius: var(--radius-md);
+  --button-height-sm: var(--space-6);
+  --button-height-md: var(--space-8);
+
+  /* Choice card — a radio with its consequence attached. Selected uses the same surface the
+     list rows use for selection, plus an accent border; an accent *tint* would have put
+     --color-fg-muted at 3.95:1 in dark, and the description is the part that has to be read. */
+  --choice-bg-selected: var(--color-surface-selected);
+  --choice-border-selected: var(--color-accent);
+
+  /* Form controls. Native elements, styled — they are keyboard-reachable without a dependency. */
+  --field-bg: var(--color-surface-sunken);
+  --field-fg: var(--color-fg);
+  --field-placeholder: var(--color-fg-subtle);
+  --field-border: var(--color-border);
+  --field-radius: var(--radius-md);
+  --field-pad-x: var(--space-2);
+  --field-pad-y: var(--space-1);
+  --field-label-fg: var(--color-fg);
+  --field-help-fg: var(--color-fg-muted);
+
+  /* Switch — one implementation, used labelled in a form and bare in a table row.
+
+     The track stays a neutral well in both states and the *thumb* carries the hue, which is what
+     keeps the contrast honest: an accent-filled track would put a light thumb at 1.8:1 on green
+     in dark mode, and there is no thumb colour that clears 3:1 on both a green and a slate track.
+     Grey-on-sunken and accent-on-sunken both clear it in both themes.
+
+     24px tall because that is the WCAG 2.2 AA minimum pointer target — ux-guidelines No. 104. */
+  --switch-track-bg: var(--color-surface-sunken);
+  --switch-track-border: var(--color-border);
+  --switch-thumb-off: var(--color-fg-subtle);
+  --switch-thumb-on: var(--color-accent);
+  --switch-width: var(--space-10);
+  --switch-height: var(--space-6);
+
+  /* Notice bar — a persistent inline strip, not a toast. Staleness does not disappear. */
+  --notice-fg: var(--status-attention-fg);
+  --notice-bg: var(--status-attention-bg);
+
+  /* Limitation notice — the sibling of the notice bar for a fact that is permanent rather than
+     a condition. Amber is reserved for "a human is needed here"; a limitation that is true on
+     every visit would burn that meaning out by the second day, so this reads as information:
+     the raised surface, a strong rule, and an icon. It is still a persistent strip, never a
+     toast (ux-guidelines No. 82 — toasts are for transient, non-critical messages). */
+  --limitation-fg: var(--color-fg-muted);
+  --limitation-fg-strong: var(--color-fg);
+  --limitation-bg: var(--color-surface-raised);
+  --limitation-border: var(--color-border-strong);
+
+  /* Schedule table. Narrower than the task status column: the widest label here is "Disabled",
+     not "Waiting — may need input". Still fixed, so a row toggling off does not reflow the
+     table mid-scan (ux-guidelines No. 19). */
+  --schedule-state-col-width: var(--space-16);
+  --schedule-row-height: var(--space-12);
+
+  /* Overlay (dialogs) */
+  --overlay-bg: var(--color-surface-raised);
+  --overlay-border: var(--color-border-strong);
+  --overlay-radius: var(--radius-lg);
+  --overlay-shadow: var(--shadow-overlay);
+  --overlay-scrim: var(--color-overlay-scrim);
+}

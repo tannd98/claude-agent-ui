@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" data-theme="dark" style="color-scheme: dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Claude Agent UI</title>
+    <!--
+      Resolve the theme before first paint so a light-mode user never sees a dark flash.
+      Kept inline and dependency-free on purpose: it must run before the bundle loads.
+      Mirrors resolveTheme() in src/hooks/useTheme.ts — change both together.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("cau.theme");
+          var pref = stored === "light" || stored === "dark" ? stored : "system";
+          var resolved =
+            pref === "system" ? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark") : pref;
+          document.documentElement.dataset.theme = resolved;
+          document.documentElement.style.colorScheme = resolved;
+        } catch (e) {
+          /* Private mode blocks localStorage; the dark default in the markup already applies. */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

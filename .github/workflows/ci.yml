@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A second push to the same branch makes the first run's answer worthless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      # One leg failing should not hide whether the other one would have.
+      fail-fast: false
+      matrix:
+        # 20 is the floor `engines` promises; 22 is what a current user actually has.
+        node: ["20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - run: npm ci
+      - run: npm --prefix web ci
+
+      - name: Typecheck
+        run: npm run typecheck && npm --prefix web run typecheck
+
+      - name: Format
+        run: npm run format:check
+
+      - name: Server tests
+        run: npm test
+
+      - name: Client tests
+        run: npm run web:test
+
+      - name: Build
+        run: npm run build
+
+      # The browser the smoke test drives. Pinned to chromium: the walk asserts headings and
+      # console errors, not rendering, so a second engine would cost minutes and prove nothing.
+      - name: Install chromium
+        run: npx playwright install --with-deps chromium
+
+      # Packs, installs the tarball into an empty directory and walks all four screens. This is
+      # the only step that exercises what `npx claude-agent-ui` would actually run.
+      - name: Packed tarball smoke test
+        run: npm run test:smoke

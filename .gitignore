@@ -1,0 +1,17 @@
+node_modules/
+dist/
+
+# Local editor / tooling state
+.omc/
+.claude/
+.DS_Store
+
+# Local runtime state lives in ~/.claude-agent-ui, never in the repo
+*.log
+
+# The shoot scripts are meant to write outside the tree (see shoot-definitions.mjs:11).
+# A run that lands shots in the repo is a slip, and 2MB of PNGs are one `git add -A` away.
+shots/
+
+# One-off probe scripts live beside the committed ones under a leading dot, and stay local
+**/scripts/.*.mjs

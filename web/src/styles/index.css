@@ -1,0 +1,169 @@
+@import "tailwindcss";
+
+/*
+ * Fonts, self-hosted from node_modules via @fontsource. There is no CDN link and no
+ * `@import url(fonts.googleapis.com)` anywhere in this app: a local console must not make an
+ * outbound request the user did not ask for. Vite fingerprints the woff2 files into the bundle.
+ */
+@import "@fontsource-variable/jetbrains-mono/index.css";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+
+@import "./tokens.css";
+
+/*
+ * Bridge the semantic token layer into Tailwind's utility namespaces so components can write
+ * `bg-surface text-fg-muted` and still be reading layer 2. `inline` keeps the var() reference
+ * live, which is what makes a theme switch a repaint rather than a rebuild.
+ */
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-raised: var(--color-surface-raised);
+  --color-surface-sunken: var(--color-surface-sunken);
+  --color-surface-hover: var(--color-surface-hover);
+  --color-surface-selected: var(--color-surface-selected);
+
+  --color-fg: var(--color-fg);
+  --color-fg-muted: var(--color-fg-muted);
+  --color-fg-subtle: var(--color-fg-subtle);
+  --color-fg-on-accent: var(--color-fg-on-accent);
+  --color-fg-on-danger: var(--color-fg-on-danger);
+
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-accent-fg: var(--color-accent-fg);
+  --color-accent-quiet: var(--color-accent-quiet);
+
+  --color-danger: var(--color-danger);
+  --color-danger-hover: var(--color-danger-hover);
+  --color-danger-fg: var(--color-danger-fg);
+  --color-danger-quiet: var(--color-danger-quiet);
+
+  --color-focus-ring: var(--color-focus-ring);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --text-2xs: var(--text-2xs);
+  --text-xs: var(--text-xs);
+  --text-sm: var(--text-sm);
+  --text-base: var(--text-base);
+  --text-lg: var(--text-lg);
+  --text-xl: var(--text-xl);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+
+  --spacing: 0.25rem;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    font-family: var(--font-sans);
+    /* Tabular figures everywhere: counts in the status bar must not reflow as they tick. */
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-bg);
+    color: var(--color-fg);
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
+  }
+
+  /*
+   * One focus style for the whole app — ux-guidelines No. 28 (Focus States) and No. 102
+   * (Focus Appearance). `:focus-visible` so a mouse click does not ring, and an offset so the
+   * ring never sits on the control's own border.
+   */
+  :focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+    border-radius: var(--radius-sm);
+  }
+
+  /* Never remove a focus ring without a replacement; nothing in this app sets outline: none. */
+
+  ::selection {
+    background-color: var(--color-accent-quiet);
+  }
+
+  /* Scrollbars that belong to the theme rather than to the OS default. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+}
+
+@layer utilities {
+  /*
+   * Skip link: present in the DOM and in the tab order, visible only when focused.
+   * `fixed`, not `absolute` — the shell wrapper is `overflow-hidden` so the page cannot
+   * scroll, and that would clip the focus ring off the top of an absolutely positioned link.
+   */
+  .skip-link {
+    position: fixed;
+    left: var(--space-3);
+    top: var(--space-3);
+    z-index: var(--z-overlay);
+    transform: translateY(-200%);
+    transition: transform var(--duration-fast) var(--ease-out);
+  }
+
+  .skip-link:focus-visible {
+    transform: translateY(0);
+  }
+
+  /*
+   * Overlay entrance. Motion dial 2 (subtle): the panel settles rather than springs, and the
+   * whole thing is removed by the prefers-reduced-motion block below.
+   */
+  .overlay-scrim[data-state="open"] {
+    animation: overlay-fade-in var(--duration-slow) var(--ease-out);
+  }
+
+  .overlay-panel[data-state="open"] {
+    animation: overlay-panel-in var(--duration-slow) var(--ease-out);
+  }
+
+  @keyframes overlay-fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @keyframes overlay-panel-in {
+    from {
+      opacity: 0;
+      transform: translate(-50%, calc(-50% + var(--space-1))) scale(0.98);
+    }
+  }
+}
+
+/*
+ * ux-guidelines No. 9 (Reduced Motion) / No. 99 (Motion Sensitivity). Motion in this app is
+ * decorative without exception, so honouring the preference means removing it, not shortening it.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
