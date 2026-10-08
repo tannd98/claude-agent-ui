@@ -8,6 +8,8 @@ export class ConfigError extends Error {}
 
 export interface AppConfig {
   port: number;
+  /** The single address to bind. Any one address is allowed; "every interface" is not. */
+  host: string;
   /** Absolute path to ~/.claude-agent-ui (or an override); all runtime state lives here. */
   dataDir: string;
   starterPrompt: string;
@@ -25,6 +27,7 @@ export interface AppConfig {
 
 export const DEFAULTS = {
   port: 3000,
+  host: "127.0.0.1",
   starterPrompt: "Start your task.",
   defaultCwd: "~",
   claudeBin: "claude",
@@ -44,6 +47,65 @@ export function defaultDataDir(home = os.homedir()): string {
   return path.join(home, ".claude-agent-ui");
 }
 
+/** Strips the brackets of an IPv6 literal and any zone id, so `[fe80::1%en0]` compares as `fe80::1`. */
+function bareHost(host: string): string {
+  const trimmed = host.trim();
+  const unbracketed = trimmed.startsWith("[") && trimmed.endsWith("]") ? trimmed.slice(1, -1) : trimmed;
+  return unbracketed.split("%")[0].toLowerCase();
+}
+
+/** True when the address reaches this machine only: the whole 127/8 range, ::1, and localhost. */
+export function isLoopback(host: string): boolean {
+  const h = bareHost(host);
+  return h === "localhost" || h === "::1" || /^127(\.\d{1,3}){3}$/.test(h);
+}
+
+/** How the host appears in a URL and in a Host header: an IPv6 literal has to wear brackets. */
+export function hostForUrl(host: string): string {
+  return host.includes(":") ? `[${host}]` : host;
+}
+
+/**
+ * True when the address means "every interface on this machine" rather than one of them.
+ *
+ * Every spelling of all-zeroes counts: `0.0.0.0`, the bare `0` Node also accepts, `::` and its
+ * longhand, the IPv4-mapped `::ffff:0.0.0.0`, and the empty string Node treats the same way.
+ */
+export function isWildcardHost(host: string): boolean {
+  const h = bareHost(host);
+  if (h === "" || h === "*") return true;
+  if (/^0+(\.0+){0,3}$/.test(h)) return true;
+  if (/^[0:]+$/.test(h) && h.includes(":")) return true;
+  return /^::ffff:0+(\.0+){3}$/.test(h);
+}
+
+/**
+ * Validates a bind address: one address, any address — a LAN address so another device on the
+ * same network can reach the UI is a supported setup, and so is a hostname of your own.
+ *
+ * What is refused is the wildcard. Binding every interface puts a UI that starts Claude Code
+ * sessions on whatever network the machine is attached to, including public ones, and it does it
+ * without the user naming an interface. Naming the address keeps that a decision rather than a
+ * side effect, so the error says which address to use instead.
+ */
+export function normalizeHost(value: unknown): string {
+  const host = String(value).trim();
+  const unbracketed = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  if (!unbracketed) throw new ConfigError("host must not be empty — pass an address such as 127.0.0.1");
+  if (isWildcardHost(unbracketed)) {
+    throw new ConfigError(
+      `host ${host} means every interface on this machine, which this server does not bind.\n` +
+        "Name the one address you want instead: 127.0.0.1 for this machine only, or the machine's\n" +
+        "LAN address (for example --host 192.168.1.42) to reach it from another device on the same\n" +
+        "network. `ipconfig getifaddr en0` (macOS) or `hostname -I` (Linux) prints that address.",
+    );
+  }
+  if (/[\s/@]/.test(unbracketed)) {
+    throw new ConfigError(`host ${host} is not an address or hostname — pass something like 127.0.0.1 or my-box.local`);
+  }
+  return unbracketed;
+}
+
 export interface CliFlags extends Partial<Record<keyof AppConfig, unknown>> {
   /** Explicit path to a config file; otherwise `<dataDir>/config.json`. */
   config?: string;
@@ -54,6 +116,7 @@ export interface CliFlags extends Partial<Record<keyof AppConfig, unknown>> {
 
 const FLAG_KEYS: Record<string, keyof CliFlags> = {
   "--port": "port",
+  "--host": "host",
   "--data-dir": "dataDir",
   "--config": "config",
   "--cwd": "defaultCwd",
@@ -80,6 +143,8 @@ Usage: claude-agent-ui [options]
 
 Options:
   --port <n>              Port to listen on, 0 picks a free one (default ${DEFAULTS.port})
+  --host <addr>           Address to bind (default ${DEFAULTS.host}); use the machine's LAN
+                          address to reach the UI from another device on the same network
   --data-dir <path>       State directory (default ~/.claude-agent-ui)
   --config <path>         Config file (default <data-dir>/config.json)
   --cwd <path>            Default working directory for new runs
@@ -93,7 +158,8 @@ Options:
   -h, --help              Show this help
   -v, --version           Show the version
 
-The server always listens on 127.0.0.1 and has no option to do otherwise.
+--host takes one address. It does not take 0.0.0.0, :: or any other way of saying "every
+interface": name the single address you want the UI reachable on.
 `;
 
 /** Parses argv (without node/script), accepting both `--flag value` and `--flag=value`. */
@@ -101,12 +167,6 @@ export function parseArgs(argv: string[]): CliFlags {
   const flags: CliFlags = {};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--host" || arg.startsWith("--host=")) {
-      throw new ConfigError(
-        "--host is not supported: claude-agent-ui only ever listens on 127.0.0.1.\n" +
-          "Use an SSH tunnel if you need to reach it from another machine.",
-      );
-    }
     const boolean = BOOLEAN_FLAGS[arg];
     if (boolean) {
       flags[boolean.key] = boolean.value as never;
@@ -125,6 +185,7 @@ export function parseArgs(argv: string[]): CliFlags {
 
 const ENV_KEYS: Record<string, keyof AppConfig | "config"> = {
   CLAUDE_AGENT_UI_PORT: "port",
+  CLAUDE_AGENT_UI_HOST: "host",
   CLAUDE_AGENT_UI_DATA_DIR: "dataDir",
   CLAUDE_AGENT_UI_CONFIG: "config",
   CLAUDE_AGENT_UI_CWD: "defaultCwd",
@@ -204,6 +265,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): AppConfig {
   return {
     // 0 is deliberate: it asks the OS for a free port, which listen() then reports back.
     port: asInt(pick("port") ?? DEFAULTS.port, "port", 0, 65535),
+    host: normalizeHost(pick("host") ?? DEFAULTS.host),
     dataDir,
     starterPrompt: String(pick("starterPrompt") ?? DEFAULTS.starterPrompt),
     defaultCwd: path.resolve(expandHome(String(pick("defaultCwd") ?? DEFAULTS.defaultCwd), home)),

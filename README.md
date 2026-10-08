@@ -54,14 +54,32 @@ anywhere that turns bypass on for everything at once.
 A task in `ask` mode that nobody answers will sit there. That is the trade, and it is the reason the
 Schedule screen tells you when a firing was skipped because the previous run is still waiting.
 
-### Loopback only
+### Which address it binds
 
-The server binds `127.0.0.1` and **there is no flag to change it** — `--host` is rejected with an
-error rather than quietly ignored. Every route is additionally behind a guard that checks `Host`
-and `Origin`, so a web page you happen to have open cannot drive it by resolving its own hostname
-to `127.0.0.1`.
+The server binds `127.0.0.1` by default: this machine only. `--host` (or `CLAUDE_AGENT_UI_HOST`,
+or `"host"` in the config file) binds a different address instead — typically the machine's LAN
+address, so you can open the UI from a phone or a laptop on the same network:
 
-If you need it from another machine, forward a port over SSH:
+```sh
+claude-agent-ui --host 192.168.1.42          # ipconfig getifaddr en0 / hostname -I prints yours
+```
+
+`--host` takes **one** address. It does not take `0.0.0.0`, `::` or any other spelling of "every
+interface": those are refused with an error naming the address to use instead. Binding every
+interface attaches a UI that starts Claude Code sessions to whatever network the machine happens
+to be on — a café Wi-Fi included — without you ever naming it. Naming the address keeps that a
+choice.
+
+**There is no login.** On a non-loopback address, anyone who can reach that address can run agents
+as you, and the CLI says so at startup. Use it on a network you trust.
+
+Every route is behind a guard that checks `Host` and `Origin`, so a web page you happen to have
+open cannot drive the server by resolving its own hostname to the address you bound. The guard
+accepts the bound address and the loopback names; a DNS name of your own that points at the same
+machine is refused, so reach it by the address.
+
+To reach it from a machine that is _not_ on the same network, keep the default and forward a port
+over SSH:
 
 ```sh
 ssh -L 3000:127.0.0.1:3000 you@that-machine
@@ -74,8 +92,8 @@ that has none of either.
 
 Nothing is collected and nothing is sent anywhere. No analytics, no crash reporting, no update
 check, no "anonymous usage statistics". The only processes it starts are your `claude` binary and,
-once at startup unless you pass `--no-open`, your browser. The only network listener is the loopback
-one above.
+once at startup unless you pass `--no-open`, your browser. The only network listener is the one
+above, on the address you chose.
 
 Your state is yours too: `~/.claude-agent-ui/` is plain JSON, written atomically, and you can read,
 back up or delete it with ordinary tools.
@@ -192,6 +210,8 @@ setting that makes it both unattended and safe.
 
 ```
 --port <n>              Port to listen on, 0 picks a free one (default 3000)
+--host <addr>           Address to bind (default 127.0.0.1); use the machine's LAN
+                        address to reach the UI from another device on the same network
 --data-dir <path>       State directory (default ~/.claude-agent-ui)
 --config <path>         Config file (default <data-dir>/config.json)
 --cwd <path>            Default working directory for new runs

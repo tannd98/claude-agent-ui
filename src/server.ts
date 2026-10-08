@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ClaudeCli, DEFAULT_PERMISSION_MODE, type PermissionMode } from "./claude/claudeCli.ts";
+import { hostForUrl } from "./config.ts";
 import { discoverAgents, findAgent, toPublic } from "./domain/agents.ts";
 import { NEW_AGENT_TEMPLATE, createAgent, deleteAgent, updateAgent } from "./domain/agentStore.ts";
 import { ValidationError } from "./domain/errors.ts";
@@ -15,8 +16,8 @@ import { discoverSkills, findSkill, readSkill, resolveAgentSkills, toPublicSkill
 import { AGENT_EVENTS, EventBus, SKILL_EVENTS } from "./events.ts";
 import { streamEvents } from "./sse.ts";
 
-/** The only address this server ever binds. There is deliberately no option to change it. */
-export const HOST = "127.0.0.1";
+/** The address bound when `--host` says nothing else: this machine only. */
+export const DEFAULT_HOST = "127.0.0.1";
 
 /**
  * The port the guard accepts in a Host header. With `--port 0` the OS picks the port at listen(),
@@ -25,18 +26,27 @@ export const HOST = "127.0.0.1";
 export type PortSource = number | (() => number);
 
 /**
- * Blocks DNS rebinding: a foreign page whose hostname resolves to 127.0.0.1 would be same-origin,
- * so require our own Host header, and for state-changing requests a matching (or absent) Origin.
+ * Blocks DNS rebinding: a foreign page whose hostname resolves to the address we bound would be
+ * same-origin, so require the Host header to name us, and for state-changing requests an Origin
+ * that matches (or is absent).
+ *
+ * "Names us" is the bound address plus the loopback spellings of it. With `--host` pointing at a
+ * LAN address, a DNS name of your own that resolves there is still refused — reach it by the
+ * address you bound, which is the one name we can check without trusting a lookup.
  */
-export function loopbackGuard(port: PortSource) {
-  const allowed = (host: string, bound: number) =>
-    host === `127.0.0.1:${bound}` || host === `localhost:${bound}` || host === `[::1]:${bound}`;
+export function hostGuard(port: PortSource, host: string = DEFAULT_HOST) {
+  const names = new Set(["127.0.0.1", "localhost", "[::1]", hostForUrl(host)]);
+  const allowed = (header: string, bound: number) => {
+    const sep = header.lastIndexOf(":");
+    if (sep === -1 || header.endsWith("]")) return false;
+    return names.has(header.slice(0, sep)) && header.slice(sep + 1) === String(bound);
+  };
   return (req: Request, res: Response, next: NextFunction) => {
     const bound = typeof port === "function" ? port() : port;
-    const host = req.headers.host ?? "";
+    const header = req.headers.host ?? "";
     const origin = req.headers.origin;
     const safeMethod = req.method === "GET" || req.method === "HEAD";
-    if (!allowed(host, bound) || (!safeMethod && origin !== undefined && origin !== `http://${host}`)) {
+    if (!allowed(header, bound) || (!safeMethod && origin !== undefined && origin !== `http://${header}`)) {
       res.status(403).json({ error: "forbidden host or origin" });
       return;
     }
@@ -58,6 +68,8 @@ export interface AppOptions {
   cli: ClaudeCli;
   /** A number, or a getter when the bound port is only known after listen() — see {@link PortSource}. */
   port: PortSource;
+  /** The address the server is bound to; the guard accepts it in a Host header. Defaults to loopback. */
+  host?: string;
   starterPrompt: string;
   defaultCwd: string;
   permissionMode?: PermissionMode;
@@ -118,7 +130,7 @@ export function createApp(opts: AppOptions) {
   app.locals.closeStreams = () => {
     for (const close of [...streams]) close();
   };
-  app.use(loopbackGuard(opts.port));
+  app.use(hostGuard(opts.port, opts.host ?? DEFAULT_HOST));
   app.use(express.json({ limit: "1mb" }));
   app.use(express.static(webRoot));
 

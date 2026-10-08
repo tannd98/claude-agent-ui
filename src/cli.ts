@@ -7,10 +7,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import open from "open";
 import { ClaudeCli, TESTED_CLI_MAJOR, execRunner, parseCliVersion } from "./claude/claudeCli.ts";
-import { ConfigError, USAGE, loadConfig, parseArgs } from "./config.ts";
+import { ConfigError, USAGE, hostForUrl, isLoopback, loadConfig, parseArgs } from "./config.ts";
 import type { TaskQueue } from "./domain/queue.ts";
 import type { Scheduler } from "./domain/schedules.ts";
-import { HOST, createApp } from "./server.ts";
+import { createApp } from "./server.ts";
 import { sweepTempFiles } from "./store/jsonStore.ts";
 import { type Lock, LockError, acquireLock } from "./store/lockfile.ts";
 
@@ -127,12 +127,21 @@ function openBrowser(url: string): void {
 }
 
 /** Turns a listen() failure into a sentence the user can act on. */
-function describeListenError(err: NodeJS.ErrnoException, port: number): string {
+export function describeListenError(err: NodeJS.ErrnoException, port: number, host: string): string {
   if (err.code === "EADDRINUSE") {
-    return `Port ${port} is already in use. Start it on another port: claude-agent-ui --port ${port + 1}`;
+    return `${host}:${port} is already in use. Start it on another port: claude-agent-ui --port ${port + 1}`;
   }
   if (err.code === "EACCES") {
     return `Port ${port} needs elevated privileges. Pick a port above 1023: claude-agent-ui --port 3000`;
+  }
+  // The usual cause of EADDRNOTAVAIL is a --host the machine does not actually hold, and the
+  // address can change on its own: a laptop gets a new DHCP lease and yesterday's flag is stale.
+  if (err.code === "EADDRNOTAVAIL") {
+    return (
+      `No interface on this machine has the address ${host}, so there is nothing to bind.\n` +
+      `Check the machine's current address (ipconfig getifaddr en0 on macOS, hostname -I on Linux)\n` +
+      `and pass that, or drop --host to listen on 127.0.0.1.`
+    );
   }
   return err.message;
 }
@@ -177,6 +186,7 @@ export async function main(argv = process.argv.slice(2)): Promise<Server | undef
     home: os.homedir(),
     cli: new ClaudeCli(execRunner(config.claudeBin)),
     port: () => boundPort,
+    host: config.host,
     starterPrompt: config.starterPrompt,
     defaultCwd: config.defaultCwd,
     permissionMode: config.permissionMode,
@@ -186,7 +196,7 @@ export async function main(argv = process.argv.slice(2)): Promise<Server | undef
     maxAttempts: config.maxAttempts,
   });
 
-  const server = app.listen(config.port, HOST);
+  const server = app.listen(config.port, config.host);
   try {
     await new Promise<void>((resolve, reject) => {
       server.once("listening", resolve);
@@ -195,7 +205,7 @@ export async function main(argv = process.argv.slice(2)): Promise<Server | undef
   } catch (err) {
     // The lock outlives a failed listen() otherwise, and the next run would refuse to start.
     lock.release();
-    throw new ConfigError(describeListenError(err as NodeJS.ErrnoException, config.port));
+    throw new ConfigError(describeListenError(err as NodeJS.ErrnoException, config.port, config.host));
   }
   // Covers every way the server goes down: close() from a test, a signal, or an unhandled throw
   // that unwinds to exit. release() is idempotent, so overlapping paths are harmless.
@@ -230,8 +240,17 @@ export async function main(argv = process.argv.slice(2)): Promise<Server | undef
 
   const address = server.address();
   boundPort = typeof address === "object" && address ? address.port : config.port;
-  const url = `http://${HOST}:${boundPort}`;
+  const url = `http://${hostForUrl(config.host)}:${boundPort}`;
   process.stdout.write(`Claude Agent UI: ${url}\n`);
+  // Said once, at the moment it becomes true: bound anywhere but loopback, every device that can
+  // reach this address can drive the UI, and the UI starts Claude Code sessions. There is no
+  // login in front of it.
+  if (!isLoopback(config.host)) {
+    process.stderr.write(
+      `Note: ${config.host} is reachable from other devices on that network, and this UI has no\n` +
+        `authentication. Keep it on a network you trust, or use --host 127.0.0.1 with an SSH tunnel.\n`,
+    );
+  }
   if (flags.open ?? true) openBrowser(url);
 
   server.on("error", (err: Error) => {

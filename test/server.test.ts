@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { test } from "node:test";
 import { ClaudeCli } from "../src/claude/claudeCli.ts";
-import { createApp, loopbackGuard } from "../src/server.ts";
+import { createApp, hostGuard } from "../src/server.ts";
 import { fixtureHome, put } from "./helpers.ts";
 
 async function withServer(fn: (port: number) => Promise<void>) {
@@ -62,7 +62,7 @@ test("loopback host is allowed; foreign Host (DNS rebinding) is refused", async 
 
 /** Drives the guard middleware directly; `status` stays 0 when it called next() instead. */
 function callGuard(
-  guard: ReturnType<typeof loopbackGuard>,
+  guard: ReturnType<typeof hostGuard>,
   headers: Record<string, string>,
   method = "GET",
 ): { status: number; nexted: boolean } {
@@ -82,8 +82,8 @@ function callGuard(
 }
 
 // Node's http client always sends a Host header, so the missing-header case is checked directly.
-test("loopbackGuard refuses a missing Host and a loopback host on the wrong port", () => {
-  const guard = loopbackGuard(3000);
+test("hostGuard refuses a missing Host and a loopback host on the wrong port", () => {
+  const guard = hostGuard(3000);
   const call = (headers: Record<string, string>, method = "GET") => callGuard(guard, headers, method);
   assert.deepEqual(call({}), { status: 403, nexted: false });
   assert.deepEqual(call({ host: "127.0.0.1:3001" }), { status: 403, nexted: false });
@@ -98,13 +98,32 @@ test("loopbackGuard refuses a missing Host and a loopback host on the wrong port
 });
 
 // Regression: --port 0 lets the OS choose, so a guard frozen on 0 would 403 the real URL.
-test("loopbackGuard follows a port that is only known after listen()", () => {
+test("hostGuard follows a port that is only known after listen()", () => {
   let bound = 0;
-  const guard = loopbackGuard(() => bound);
+  const guard = hostGuard(() => bound);
   assert.deepEqual(callGuard(guard, { host: "127.0.0.1:54321" }), { status: 403, nexted: false });
   bound = 54321;
   assert.deepEqual(callGuard(guard, { host: "127.0.0.1:54321" }), { status: 0, nexted: true });
   assert.deepEqual(callGuard(guard, { host: "127.0.0.1:0" }), { status: 403, nexted: false });
+});
+
+test("a configured host is accepted in the Host header, and other names still are not", () => {
+  const guard = hostGuard(3000, "192.168.1.42");
+  assert.deepEqual(callGuard(guard, { host: "192.168.1.42:3000" }), { status: 0, nexted: true });
+  // Loopback keeps working from the machine itself, and the rebinding guard is otherwise unchanged.
+  assert.deepEqual(callGuard(guard, { host: "127.0.0.1:3000" }), { status: 0, nexted: true });
+  assert.deepEqual(callGuard(guard, { host: "192.168.1.42:3001" }), { status: 403, nexted: false });
+  assert.deepEqual(callGuard(guard, { host: "192.168.1.43:3000" }), { status: 403, nexted: false });
+  assert.deepEqual(callGuard(guard, { host: "evil.example:3000" }), { status: 403, nexted: false });
+  assert.deepEqual(callGuard(guard, { host: "192.168.1.42.evil.example:3000" }), { status: 403, nexted: false });
+});
+
+test("an IPv6 host is matched in its bracketed form, and a host with no port is refused", () => {
+  const guard = hostGuard(3000, "fe80::1");
+  assert.deepEqual(callGuard(guard, { host: "[fe80::1]:3000" }), { status: 0, nexted: true });
+  assert.deepEqual(callGuard(guard, { host: "fe80::1:3000" }), { status: 403, nexted: false });
+  assert.deepEqual(callGuard(guard, { host: "[fe80::1]" }), { status: 403, nexted: false });
+  assert.deepEqual(callGuard(guard, { host: "127.0.0.1" }), { status: 403, nexted: false });
 });
 
 test("state-changing requests need a matching or absent Origin", async () => {

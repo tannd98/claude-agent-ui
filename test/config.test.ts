@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "node:test";
-import { ConfigError, DEFAULTS, defaultDataDir, expandHome, loadConfig, parseArgs } from "../src/config.ts";
+import { ConfigError, DEFAULTS, defaultDataDir, expandHome, isLoopback, loadConfig, parseArgs } from "../src/config.ts";
 import { put, tempHome } from "./helpers.ts";
 
 const load = (opts: { argv?: string[]; env?: NodeJS.ProcessEnv; home: string }) =>
@@ -51,18 +51,55 @@ test("--data-dir moves the state directory and the config file with it", async (
   assert.equal(config.starterPrompt, "from elsewhere");
 });
 
-test("--host is refused with an explanation, not silently accepted", async () => {
+test("--host binds the address it is given, and defaults to loopback", async () => {
   const home = await tempHome();
-  for (const argv of [["--host", "0.0.0.0"], ["--host=::"]]) {
+  assert.equal(load({ home }).host, "127.0.0.1");
+  assert.equal(load({ home, argv: ["--host", "192.168.1.42"] }).host, "192.168.1.42");
+  assert.equal(load({ home, argv: ["--host=my-box.local"] }).host, "my-box.local");
+  // An IPv6 literal is accepted with or without the brackets a URL needs, and stored without them.
+  assert.equal(load({ home, argv: ["--host", "[fe80::1]"] }).host, "fe80::1");
+  assert.equal(load({ home, env: { CLAUDE_AGENT_UI_HOST: "10.0.0.5" } }).host, "10.0.0.5");
+  assert.equal(
+    load({ home, env: { CLAUDE_AGENT_UI_HOST: "10.0.0.5" }, argv: ["--host", "10.0.0.6"] }).host,
+    "10.0.0.6",
+  );
+  await put(path.join(home, ".claude-agent-ui", "config.json"), JSON.stringify({ host: "10.0.0.7" }));
+  assert.equal(load({ home }).host, "10.0.0.7");
+});
+
+test("a wildcard host is refused with the address to use instead", async () => {
+  const home = await tempHome();
+  const wildcards = ["0.0.0.0", "::", "[::]", "0:0:0:0:0:0:0:0", "::0", "0", "*", "::ffff:0.0.0.0"];
+  for (const value of wildcards) {
     assert.throws(
-      () => load({ home, argv }),
+      () => load({ home, argv: ["--host", value] }),
       (err: unknown) => {
-        assert.ok(err instanceof ConfigError);
-        assert.match(err.message, /only ever listens on 127\.0\.0\.1/);
+        assert.ok(err instanceof ConfigError, value);
+        assert.match(err.message, /every interface/);
+        assert.match(err.message, /LAN address/);
         return true;
       },
+      value,
     );
   }
+  // The env var and the config file go through the same check as the flag.
+  assert.throws(() => load({ home, env: { CLAUDE_AGENT_UI_HOST: "0.0.0.0" } }), /every interface/);
+  await put(path.join(home, ".claude-agent-ui", "config.json"), JSON.stringify({ host: "::" }));
+  assert.throws(() => load({ home }), /every interface/);
+});
+
+test("a host that is not an address at all is refused", async () => {
+  const home = await tempHome();
+  assert.throws(() => load({ home, argv: ["--host", "http://10.0.0.5"] }), /not an address or hostname/);
+  assert.throws(() => load({ home, argv: ["--host", "me@10.0.0.5"] }), /not an address or hostname/);
+  assert.throws(() => load({ home, argv: ["--host", "  "] }), /host must not be empty/);
+});
+
+test("isLoopback recognises the whole 127 range, ::1 and localhost", () => {
+  for (const host of ["127.0.0.1", "127.1.2.3", "::1", "[::1]", "localhost"]) {
+    assert.equal(isLoopback(host), true, host);
+  }
+  for (const host of ["192.168.1.42", "fe80::1", "my-box.local"]) assert.equal(isLoopback(host), false, host);
 });
 
 test("unknown options and missing values fail with a readable message", async () => {

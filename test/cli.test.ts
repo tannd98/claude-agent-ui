@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "node:test";
 import { TESTED_CLI_MAJOR, parseCliVersion } from "../src/claude/claudeCli.ts";
-import { checkClaudeBinary, checkClaudeCliVersion, checkNodeVersion, main, readVersion } from "../src/cli.ts";
+import {
+  checkClaudeBinary,
+  checkClaudeCliVersion,
+  checkNodeVersion,
+  describeListenError,
+  main,
+  readVersion,
+} from "../src/cli.ts";
 import { fakeClaudeBin, tempHome } from "./helpers.ts";
 
 test("the Node preflight explains what to do, and passes on supported versions", () => {
@@ -134,4 +141,42 @@ test("an untested CLI major warns on stderr and starts anyway", async () => {
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test("--host binds the address it is given, and the printed URL is the one that works", async () => {
+  const home = await tempHome();
+  // "localhost" is the one non-default host every machine running the suite is guaranteed to
+  // hold; binding a real LAN address in a test would depend on the network it runs on.
+  const { server, out, err } = await runMain([
+    "--port",
+    "0",
+    "--host",
+    "localhost",
+    "--data-dir",
+    path.join(home, ".claude-agent-ui"),
+    "--claude-bin",
+    await fakeClaudeBin(),
+    "--no-open",
+  ]);
+  assert.ok(server, "main should return the listening server");
+  try {
+    const url = /Claude Agent UI: (\S+)/.exec(out)?.[1];
+    assert.ok(url, `no URL in output: ${out}`);
+    assert.match(url, /^http:\/\/localhost:\d+$/);
+    assert.equal((await fetch(`${url}/api/config`)).status, 200);
+    // Loopback by another name is still loopback, so there is nothing to warn about.
+    assert.equal(err, "");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("a listen failure explains the port or the missing address", () => {
+  const err = (code: string) => Object.assign(new Error("listen failed"), { code });
+  assert.match(describeListenError(err("EADDRINUSE"), 3000, "127.0.0.1"), /already in use.*--port 3001/s);
+  assert.match(describeListenError(err("EACCES"), 80, "127.0.0.1"), /needs elevated privileges/);
+  const gone = describeListenError(err("EADDRNOTAVAIL"), 3000, "192.168.1.42");
+  assert.match(gone, /No interface on this machine has the address 192\.168\.1\.42/);
+  assert.match(gone, /drop --host/);
+  assert.equal(describeListenError(err("EWHATEVER"), 3000, "127.0.0.1"), "listen failed");
 });
