@@ -21,6 +21,7 @@ import {
 } from "../lib/api.ts";
 import {
   PRIORITY_LEVELS,
+  answerable,
   cancelOutcome,
   pathTail,
   taskBadge,
@@ -639,17 +640,15 @@ function TaskExpansion({ task }: { task: TaskView }) {
         </Meta>
       </dl>
 
-      {task.waiting && (
+      {answerable(task) && (
         <section className="rounded-[var(--radius-md)] bg-[var(--notice-bg)] px-3 py-2">
           <p className="text-xs font-medium text-[var(--notice-fg)]">
             {badge.label}
             {reason ? ` — ${reason}` : ""}
           </p>
-          {task.attachCommand && (
-            <p className="mt-1 text-xs text-fg-muted">
-              Answer it in a terminal: <code className="font-mono text-2xs text-fg">{task.attachCommand}</code>
-            </p>
-          )}
+          <p className="mt-1 text-xs text-fg-muted">
+            Answer it in a terminal: <code className="font-mono text-2xs text-fg">{task.attachCommand}</code>
+          </p>
         </section>
       )}
 

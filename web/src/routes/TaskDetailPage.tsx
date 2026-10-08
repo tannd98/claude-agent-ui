@@ -17,7 +17,7 @@ import {
   type TaskView,
   type TranscriptMessage,
 } from "../lib/api.ts";
-import { cancelOutcome, duration, priorityLabel, taskBadge } from "../lib/taskStatus.ts";
+import { answerable, cancelOutcome, duration, priorityLabel, taskBadge } from "../lib/taskStatus.ts";
 import { cn } from "../lib/utils.ts";
 
 /**
@@ -253,7 +253,7 @@ function Metadata({ task }: { task: TaskView }) {
     <div className="flex flex-col gap-6 p-6">
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={badge.status} label={badge.label} title={badge.title} />
-        {task.waiting && task.attachCommand && (
+        {answerable(task) && (
           <span className="text-xs text-fg-muted">
             Answer it in a terminal: <code className="font-mono text-2xs text-fg">{task.attachCommand}</code>
           </span>

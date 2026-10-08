@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import {
   type BackgroundSession,
@@ -551,8 +552,12 @@ export class TaskQueue {
   }
 
   private async watch(): Promise<void> {
-    const running = (await this.load()).filter((t) => t.state === "running" && t.runId);
-    if (!running.length) {
+    const tasks = await this.load();
+    const running = tasks.filter((t) => t.state === "running" && t.runId);
+    // Blocked is the one terminal state that is not over, so it is polled alongside running.
+    // See `revive`. A blocked task drops out of this set once its session is gone.
+    const blocked = tasks.filter((t) => t.state === "blocked" && t.runId);
+    if (!running.length && !blocked.length) {
       // Nothing to poll for, so there is nothing stale to warn about either.
       this.warning = null;
       return;
@@ -570,6 +575,83 @@ export class TaskQueue {
     for (const task of running) {
       await this.settle(task, byId.get(task.runId!));
     }
+    for (const task of blocked) {
+      await this.revive(task, byId.get(task.runId!));
+    }
+  }
+
+  /**
+   * Blocked is the only terminal state a human is expected to undo, so it is the only one that
+   * can un-settle.
+   *
+   * The `BLOCKED:` protocol ends the turn on purpose — it is how an unattended agent asks a
+   * question — but ending the turn does not end the session. The user reads the question,
+   * `claude attach`es, answers, and the same session goes straight back to work. Without this the
+   * record stays `blocked` for good: `watch` only ever polled running tasks, so nothing looked at
+   * the session again, and the row kept saying "Blocked" over an agent that was already past it
+   * and would never report what it did next.
+   *
+   * Only the session the attempt actually started, and only while the CLI still lists it. Once it
+   * does not, nothing can wake the session, so `runId` is cleared: the attach command it powers
+   * would fail anyway, and the task leaves the watch set rather than keeping a CLI poll alive for
+   * as long as it sits in the history.
+   */
+  private async revive(task: TaskRecord, session: BackgroundSession | undefined): Promise<void> {
+    const status = mapStatus(session);
+    const stillBlocked = (t: TaskRecord) => t.state === "blocked" && t.runId === task.runId;
+    if (status === "missing") {
+      await this.patch(task.id, (t) => {
+        if (!stillBlocked(t)) return false;
+        t.runId = null;
+        return true;
+      });
+      return;
+    }
+    // Idle or done is usually the session as the block left it: asked, and still waiting to be
+    // answered. Usually — `movedOn` is the case where it is not.
+    if (status !== "running" && status !== "waiting" && !(await this.movedOn(task))) return;
+    const wait = status === "waiting" && session ? sessionWait(session) : null;
+    await this.patch(task.id, (t) => {
+      if (!stillBlocked(t)) return false;
+      t.state = "running";
+      t.finishedAt = null;
+      // The question it asked is not the outcome of anything any more. The resumed session
+      // writes its own result when it ends, and `settle` reads it then.
+      t.result = null;
+      t.error = null;
+      t.waiting = wait ? { ...wait, since: Date.now() } : null;
+      return true;
+    });
+  }
+
+  /**
+   * Whether a session that is sitting idle has written anything since the question was recorded.
+   *
+   * Polling for a busy session catches the usual answer, which takes the agent a while to act on.
+   * It does not catch a short one: "no, stop" can be read, answered and over inside a single poll
+   * interval, and from here that session never looks like anything but idle — idle before the
+   * answer, idle after it. The transcript is the only witness, and the one thing it says is that
+   * it has grown since the `BLOCKED:` message this task was blocked on.
+   *
+   * That is enough to put the task back to `running` and let `settle` read the real ending on the
+   * next pass, with the same transcript read every other run ends with. A write that turns out to
+   * be another `BLOCKED:` simply blocks it again, now against the later `finishedAt` — so a
+   * transcript touched for any other reason costs one pass and then settles for good.
+   *
+   * A stamp the clock has not reached yet is not evidence that something already happened, and
+   * taking it as such is the one way this does not settle: every pass would find it newer than
+   * the `finishedAt` it just wrote. Ignored until the clock catches up with it.
+   */
+  private async movedOn(task: TaskRecord): Promise<boolean> {
+    if (!task.sessionId || task.finishedAt === null) return false;
+    const file = await findTranscript(this.home, task.sessionId);
+    if (!file) return false;
+    const stats = await stat(file).catch(() => null);
+    if (!stats) return false;
+    // Floored, because the stamp this is compared against came from `Date.now()`: without it a
+    // transcript written in the same millisecond reads as newer by its fraction of one.
+    const written = Math.floor(stats.mtimeMs);
+    return written > task.finishedAt && written <= Date.now();
   }
 
   private async settle(task: TaskRecord, session: BackgroundSession | undefined): Promise<void> {

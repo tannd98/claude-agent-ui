@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, utimes } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { type BackgroundSession, CliError, ClaudeCli, type StartBackgroundOptions } from "../src/claude/claudeCli.ts";
@@ -147,6 +147,16 @@ async function writeTranscript(home: string, sessionId: string, text: string): P
   );
 }
 
+/**
+ * Dates a transcript exactly. A real write lands between the moment a task was blocked and now,
+ * but in a test those two are a millisecond or so apart — too close to leave to the clock.
+ */
+async function touchTranscript(home: string, sessionId: string, at: number): Promise<void> {
+  const file = path.join(home, ".claude", "projects", "-work", `${sessionId}.jsonl`);
+  const when = new Date(at);
+  await utimes(file, when, when);
+}
+
 const taskIds = (events: BusEvent[], type: string) =>
   events.filter((e) => e.type === type).map((e) => (e.data as { taskId: string }).taskId);
 
@@ -252,6 +262,161 @@ test("a BLOCKED: reply lands in state blocked with the sentinel stripped", async
   assert.equal(task.state, "blocked");
   // Stripped server-side: the sentinel comes from the prompt we inject, so the UI never sees it.
   assert.equal(task.result, "I need the staging database URL.");
+
+  // The question is unanswered, so the session sits idle and the task stays put. Only an actual
+  // resume reopens it — a blocked task must not flicker back to running on its own.
+  await queue.tick();
+  assert.equal((await view(queue, created.id)).state, "blocked");
+});
+
+test("answering a blocked task's session puts the task back to running", async () => {
+  const { home, cli, queue } = await harness();
+  const created = await queue.create({ agent: "alpha", prompt: "x" });
+  await queue.tick();
+  await writeTranscript(home, "run1-session", "BLOCKED: I need the staging database URL.");
+  cli.finish("run1");
+  await queue.tick();
+  assert.equal((await view(queue, created.id)).state, "blocked");
+
+  // `claude attach run1`, the user answers, the same session goes back to work.
+  cli.resume("run1");
+  await queue.tick();
+
+  const resumed = await view(queue, created.id);
+  assert.equal(resumed.state, "running");
+  assert.equal(resumed.runId, "run1");
+  // It is not finished and the question is no longer an outcome; the attempt is the same one.
+  assert.equal(resumed.finishedAt, null);
+  assert.equal(resumed.result, null);
+  assert.equal(resumed.attempts, 1);
+
+  // And the resumed session's own result is the one that lands.
+  await writeTranscript(home, "run1-session", "Pointed it at staging and the pipeline is green.");
+  cli.finish("run1");
+  await queue.tick();
+  const done = await view(queue, created.id);
+  assert.equal(done.state, "succeeded");
+  assert.equal(done.result, "Pointed it at staging and the pipeline is green.");
+});
+
+test("a resumed blocked task takes a concurrency slot back", async () => {
+  const { home, cli, queue } = await harness({ concurrency: 1 });
+  const first = await queue.create({ agent: "alpha", prompt: "x" });
+  await queue.tick();
+  await writeTranscript(home, "run1-session", "BLOCKED: which branch?");
+  cli.finish("run1");
+  // Blocking frees the slot, so the next task starts.
+  await queue.tick();
+  const second = await queue.create({ agent: "alpha", prompt: "next" });
+  await queue.tick();
+  assert.equal((await view(queue, second.id)).state, "running");
+
+  // Both are live now. The queue reports what is true rather than capping the count.
+  cli.resume("run1");
+  await queue.tick();
+  assert.equal((await view(queue, first.id)).state, "running");
+  const stats = await queue.stats();
+  assert.equal(stats.running, 2);
+  assert.equal(stats.queued, 0);
+});
+
+test("a block answered and finished inside one poll is picked up from the transcript", async () => {
+  const { home, cli, queue } = await harness();
+  const created = await queue.create({ agent: "alpha", prompt: "x" });
+  await queue.tick();
+  await writeTranscript(home, "run1-session", "BLOCKED: shall I force-push?");
+  cli.finish("run1");
+  await queue.tick();
+  const blocked = await view(queue, created.id);
+  assert.equal(blocked.state, "blocked");
+
+  // "no, stop" — read, answered and over before the next poll, so the session is idle on both
+  // sides of it and never once looks busy from here. The grown transcript is the only witness.
+  await writeTranscript(home, "run1-session", "Left it alone, as you asked.");
+  await touchTranscript(home, "run1-session", blocked.finishedAt! + 1);
+  await queue.tick();
+  assert.equal((await view(queue, created.id)).state, "running");
+
+  await queue.tick();
+  const done = await view(queue, created.id);
+  assert.equal(done.state, "succeeded");
+  assert.equal(done.result, "Left it alone, as you asked.");
+});
+
+test("an answer that only asks the next question settles blocked again and stays there", async () => {
+  const { home, cli, queue } = await harness();
+  const created = await queue.create({ agent: "alpha", prompt: "x" });
+  await queue.tick();
+  await writeTranscript(home, "run1-session", "BLOCKED: which branch?");
+  cli.finish("run1");
+  await queue.tick();
+
+  const blocked = await view(queue, created.id);
+  await writeTranscript(home, "run1-session", "BLOCKED: and which remote?");
+  await touchTranscript(home, "run1-session", blocked.finishedAt! + 1);
+  await queue.tick();
+  await queue.tick();
+  const task = await view(queue, created.id);
+  assert.equal(task.state, "blocked");
+  assert.equal(task.result, "and which remote?");
+
+  // Blocked against the later transcript now, so it does not keep reviving itself.
+  await queue.tick();
+  assert.equal((await view(queue, created.id)).state, "blocked");
+});
+
+test("a transcript stamped in the future is not read as something that already happened", async () => {
+  const { home, cli, queue } = await harness();
+  const created = await queue.create({ agent: "alpha", prompt: "x" });
+  await queue.tick();
+  await writeTranscript(home, "run1-session", "BLOCKED: which branch?");
+  cli.finish("run1");
+  await queue.tick();
+
+  // A minute ahead of this clock. Taking it as news would revive the task on every single pass,
+  // because each pass writes a `finishedAt` the stamp is still ahead of.
+  await touchTranscript(home, "run1-session", Date.now() + 60_000);
+  await queue.tick();
+  await queue.tick();
+  const task = await view(queue, created.id);
+  assert.equal(task.state, "blocked");
+  assert.equal(task.result, "which branch?");
+});
+
+test("a blocked task whose session is gone loses its attach command", async () => {
+  const { home, cli, queue } = await harness();
+  const created = await queue.create({ agent: "alpha", prompt: "x" });
+  await queue.tick();
+  await writeTranscript(home, "run1-session", "BLOCKED: which branch?");
+  cli.finish("run1");
+  await queue.tick();
+  assert.equal((await view(queue, created.id)).attachCommand, "claude attach run1");
+
+  cli.vanish("run1");
+  await queue.tick();
+  const task = await view(queue, created.id);
+  // Still blocked — nothing can answer it now — and no command that would fail if run.
+  assert.equal(task.state, "blocked");
+  assert.equal(task.runId, null);
+  assert.equal(task.attachCommand, null);
+  assert.equal(task.result, "which branch?");
+});
+
+test("a CLI read failure never revives a blocked task", async () => {
+  const { home, cli, queue } = await harness();
+  const created = await queue.create({ agent: "alpha", prompt: "x" });
+  await queue.tick();
+  await writeTranscript(home, "run1-session", "BLOCKED: which branch?");
+  cli.finish("run1");
+  await queue.tick();
+
+  cli.listError = "claude: command not found";
+  await queue.tick();
+  const task = await view(queue, created.id);
+  assert.equal(task.state, "blocked");
+  // Not treated as a vanished session: we could not read, so nothing is known either way.
+  assert.equal(task.runId, "run1");
+  assert.match((await queue.list()).warning ?? "", /command not found/);
 });
 
 test("a waiting session is reported inline, holds its slot, and announces once", async () => {

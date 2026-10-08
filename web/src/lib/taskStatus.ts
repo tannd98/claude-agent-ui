@@ -119,6 +119,21 @@ export function taskReason(task: TaskView): string | null {
 }
 
 /**
+ * Whether there is a live session a human can still answer in.
+ *
+ * Both amber conditions qualify, and for the same reason: `waiting` is parked mid-turn on a
+ * prompt, `blocked` ended the turn with a question, and either way the session is still there, so
+ * `claude attach` reaches an agent that carries on once it has an answer. The server watches a
+ * blocked task's session and moves it back to running when that happens, which is what makes the
+ * hint worth printing on a blocked task rather than only on a waiting one.
+ *
+ * `attachCommand` is null once the CLI has forgotten the session — nothing left to attach to.
+ */
+export function answerable(task: TaskView): boolean {
+  return task.attachCommand !== null && (task.waiting !== null || task.state === "blocked");
+}
+
+/**
  * The tail of a path, for a column too narrow for the whole thing.
  *
  * Done in JS rather than with `dir="rtl"`: that CSS trick truncates from the correct end but

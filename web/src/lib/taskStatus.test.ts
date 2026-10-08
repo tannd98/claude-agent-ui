@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { TaskView } from "./api.ts";
-import { cancelOutcome, duration, pathTail, taskBadge, taskGroup, taskReason, taskTiming } from "./taskStatus.ts";
+import {
+  answerable,
+  cancelOutcome,
+  duration,
+  pathTail,
+  taskBadge,
+  taskGroup,
+  taskReason,
+  taskTiming,
+} from "./taskStatus.ts";
 
 const BASE: TaskView = {
   id: "t-1",
@@ -149,6 +158,28 @@ describe("taskReason", () => {
 
   it("renders nothing rather than a stand-in when the wait has no named reason", () => {
     expect(taskReason(task({ state: "running", waiting: { reason: "other", detail: "", since: 1 } }))).toBeNull();
+  });
+});
+
+describe("answerable", () => {
+  const attach = { attachCommand: "claude attach run1" };
+
+  it("covers both amber conditions, because both reach a session that can carry on", () => {
+    expect(
+      answerable(task({ ...attach, state: "running", waiting: { reason: "permission", detail: "", since: 0 } })),
+    ).toBe(true);
+    expect(answerable(task({ ...attach, state: "blocked", result: "Which branch?" }))).toBe(true);
+  });
+
+  it("is false once there is no session left to attach to", () => {
+    expect(answerable(task({ state: "blocked", attachCommand: null }))).toBe(false);
+  });
+
+  it("does not offer a terminal that has nothing to answer", () => {
+    for (const state of ["queued", "succeeded", "failed", "cancelled"] as const) {
+      expect(answerable(task({ ...attach, state }))).toBe(false);
+    }
+    expect(answerable(task({ ...attach, state: "running" }))).toBe(false);
   });
 });
 
