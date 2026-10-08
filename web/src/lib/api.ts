@@ -28,6 +28,23 @@ export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError;
 }
 
+/**
+ * Cookie the server sets alongside the HttpOnly one, carrying no secret and saying only that a
+ * session exists. See HINT_COOKIE in ../../../src/auth.ts.
+ */
+const AUTH_HINT_COOKIE = "cau_auth";
+
+/** True when this browser is signed in, so the UI knows whether Sign out would mean anything. */
+export function isSignedIn(): boolean {
+  if (typeof document === "undefined") return false;
+  return document.cookie.split(";").some((pair) => pair.trim().startsWith(`${AUTH_HINT_COOKIE}=`));
+}
+
+/** Guarded: a reload is a no-op outside a browser, and a test renderer is not one. */
+function reauthenticate(): void {
+  if (typeof window !== "undefined") window.location.reload();
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -40,6 +57,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError("Could not reach the claude-agent-ui server. Is it still running?", 0, { cause });
   }
   if (!res.ok) {
+    // The cookie expired or was cleared while this tab was open. Nothing in here can fix that,
+    // and the server answers a plain navigation with its sign-in page — so reload and let it.
+    if (res.status === 401) reauthenticate();
     const body = await res.json().catch(() => null as { error?: string; fields?: FieldError[] } | null);
     throw new ApiError(body?.error ?? `${res.status} ${res.statusText}`, res.status, {
       fields: Array.isArray(body?.fields) ? body.fields : [],
@@ -347,6 +367,8 @@ export interface AppConfig {
   defaultCwd: string;
   starterPrompt: string;
   permissionMode: PermissionMode;
+  /** Whether this server asks for a token at all; false means Sign out has nothing to end. */
+  auth: boolean;
   /** Starting content for a new definition, so "New agent" opens a file that already parses. */
   templates: { agent: string; skill: string };
 }

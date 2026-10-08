@@ -6,6 +6,7 @@ import {
   checkClaudeBinary,
   checkClaudeCliVersion,
   checkNodeVersion,
+  describeAuth,
   describeListenError,
   main,
   readVersion,
@@ -41,6 +42,31 @@ test("parseCliVersion reads the version out of what the CLI actually prints", ()
   // Unreadable is not "wrong version": the binary ran, so we must not accuse it of anything.
   assert.equal(parseCliVersion("Claude Code"), null);
   assert.equal(parseCliVersion(""), null);
+});
+
+test("the startup note about authentication says the one thing the user cannot find out elsewhere", () => {
+  const base = { dataDir: "/data", host: "127.0.0.1" };
+  const url = "http://127.0.0.1:3000/?token=abc";
+
+  // The default start: loopback, no token, nothing worth a sentence.
+  assert.equal(describeAuth({ ...base, token: null, tokenGenerated: false }, url), "");
+
+  // A generated token exists nowhere else, so it is printed in full, with how to stop it moving.
+  const generated = describeAuth({ ...base, host: "192.168.1.42", token: "abc", tokenGenerated: true }, url);
+  assert.match(generated, /http:\/\/127\.0\.0\.1:3000\/\?token=abc/);
+  assert.match(generated, /new every restart/);
+  assert.match(generated, /\/data\/config\.json/);
+
+  // A token the user chose is already written down somewhere they control, and this line can end
+  // up in a launchd or systemd log, so it is never echoed back.
+  const chosen = describeAuth({ ...base, token: "abc", tokenGenerated: false }, url);
+  assert.match(chosen, /Authentication is on/);
+  assert.doesNotMatch(chosen, /abc/);
+
+  // Off on an address other devices can reach is the one combination that still warrants a warning.
+  const open = describeAuth({ ...base, host: "192.168.1.42", token: null, tokenGenerated: false }, url);
+  assert.match(open, /anyone who can reach it can run agents as you/);
+  assert.match(open, /--no-auth/);
 });
 
 test("the version check is silent on the tested major and loud on either side of it", () => {

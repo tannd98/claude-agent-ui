@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { ThemeContext } from "../hooks/themeContext.ts";
 import { useTheme } from "../hooks/useTheme.ts";
 import { NAV_AREAS, Sidebar } from "./Sidebar.tsx";
@@ -50,6 +50,25 @@ describe("Sidebar", () => {
     render(<Harness initial="/schedule" />);
     expect(screen.getByRole("link", { name: "Schedule" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Agents" })).not.toHaveAttribute("aria-current");
+  });
+
+  // The hint cookie the server sets next to the HttpOnly one — see HINT_COOKIE in src/auth.ts.
+  afterEach(() => {
+    document.cookie = "cau_auth=; Max-Age=0; path=/";
+  });
+
+  it("offers Sign out only on a server that asked for a token", () => {
+    render(<Harness />);
+    // The default start is loopback with no authentication: there is no session to end, and a
+    // button that cannot do anything is worse than no button.
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
+
+    document.cookie = "cau_auth=1; path=/";
+    render(<Harness />);
+    const signOut = screen.getByRole("button", { name: "Sign out" });
+    // A real form post, so it behaves exactly as the server-rendered sign-in page does.
+    expect(signOut.closest("form")).toHaveAttribute("action", "/api/auth/logout");
+    expect(signOut.closest("form")).toHaveAttribute("method", "post");
   });
 
   it("exposes all three theme choices, not a two-state toggle", () => {

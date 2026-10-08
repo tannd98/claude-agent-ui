@@ -139,4 +139,62 @@ test("--help and --version are parsed as boolean flags", () => {
   assert.deepEqual(parseArgs(["-v"]), { version: true });
   assert.deepEqual(parseArgs(["--open"]), { open: true });
   assert.deepEqual(parseArgs(["--no-open"]), { open: false });
+  assert.deepEqual(parseArgs(["--auth"]), { auth: true });
+  assert.deepEqual(parseArgs(["--no-auth"]), { auth: false });
+});
+
+test("authentication follows the bound address: off on loopback, on everywhere else", async () => {
+  const home = await tempHome();
+  // The default start. `npx claude-agent-ui` stays a URL and nothing to sign in to.
+  const local = load({ home });
+  assert.equal(local.token, null);
+  assert.equal(local.tokenGenerated, false);
+
+  // A LAN address can be reached by other devices, so it comes with a token nobody had to think of.
+  const lan = load({ home, argv: ["--host", "192.168.1.42"] });
+  assert.equal(lan.tokenGenerated, true);
+  assert.match(lan.token!, /^[A-Za-z0-9_-]{32}$/);
+  // Generated per load, never derived from anything stable.
+  assert.notEqual(lan.token, load({ home, argv: ["--host", "192.168.1.42"] }).token);
+});
+
+test("--token turns authentication on wherever the server is bound", async () => {
+  const home = await tempHome();
+  const config = load({ home, argv: ["--token", "hunter2-and-then-some"] });
+  assert.equal(config.token, "hunter2-and-then-some");
+  assert.equal(config.tokenGenerated, false);
+  // Env and config file reach it the same way everything else does.
+  assert.equal(load({ home, env: { CLAUDE_AGENT_UI_TOKEN: "from-the-env" } }).token, "from-the-env");
+  await put(path.join(home, ".claude-agent-ui", "config.json"), JSON.stringify({ token: "from-the-file" }));
+  assert.equal(load({ home }).token, "from-the-file");
+  assert.equal(load({ home, env: { CLAUDE_AGENT_UI_TOKEN: "from-the-env" } }).token, "from-the-env");
+});
+
+test("--auth and --no-auth override what the address would have decided", async () => {
+  const home = await tempHome();
+  assert.match(load({ home, argv: ["--auth"] }).token!, /^[A-Za-z0-9_-]{32}$/);
+  assert.equal(load({ home, argv: ["--host", "192.168.1.42", "--no-auth"] }).token, null);
+  assert.equal(load({ home, env: { CLAUDE_AGENT_UI_AUTH: "on" } }).tokenGenerated, true);
+  await put(path.join(home, ".claude-agent-ui", "config.json"), JSON.stringify({ auth: true }));
+  assert.equal(load({ home }).tokenGenerated, true);
+  assert.throws(
+    () => load({ home, argv: ["--host", "10.0.0.5"], env: { CLAUDE_AGENT_UI_AUTH: "maybe" } }),
+    /auth must be/,
+  );
+});
+
+test("a token with authentication turned off is refused rather than quietly ignored", async () => {
+  const home = await tempHome();
+  assert.throws(
+    () => load({ home, argv: ["--token", "hunter2-and-then-some", "--no-auth"] }),
+    /token is set but authentication is turned off/,
+  );
+});
+
+test("a chosen token has a floor, so a two-character one is not mistaken for protection", async () => {
+  const home = await tempHome();
+  assert.throws(() => load({ home, argv: ["--token", "abc"] }), /at least 8 characters/);
+  // Blank is "no token given", not a token: on loopback that is simply the default.
+  assert.equal(load({ home, argv: ["--token", "   "] }).token, null);
+  assert.equal(load({ home, argv: ["--host", "10.0.0.5", "--token", ""] }).tokenGenerated, true);
 });

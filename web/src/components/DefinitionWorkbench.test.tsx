@@ -25,6 +25,7 @@ const CONFIG: AppConfig = {
   defaultCwd: "/work",
   starterPrompt: "Start your task.",
   permissionMode: "ask",
+  auth: false,
   templates: {
     agent: "---\nname: my-agent\ndescription: x\n---\n",
     skill: "---\nname: my-skill\ndescription: x\n---\n",

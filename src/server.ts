@@ -2,6 +2,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { authGuard, clearAuthCookies } from "./auth.ts";
 import { ClaudeCli, DEFAULT_PERMISSION_MODE, type PermissionMode } from "./claude/claudeCli.ts";
 import { hostForUrl } from "./config.ts";
 import { discoverAgents, findAgent, toPublic } from "./domain/agents.ts";
@@ -80,6 +81,8 @@ export interface AppOptions {
   maxAttempts?: number;
   /** How often the queue polls the CLI; tests drive `tick()` by hand instead. */
   pollMs?: number;
+  /** The shared token every request must carry; `null` or absent turns authentication off. */
+  token?: string | null;
   /** Directory holding the built web client; defaults to `web/` next to this module. */
   webRoot?: string;
   /** The bus /api/events streams; one is created when the caller does not supply it. */
@@ -132,6 +135,16 @@ export function createApp(opts: AppOptions) {
   };
   app.use(hostGuard(opts.port, opts.host ?? DEFAULT_HOST));
   app.use(express.json({ limit: "1mb" }));
+  // Ahead of the static files as well as the API, so an unauthenticated browser is handed the
+  // sign-in page rather than an app shell that can only render errors. See src/auth.ts.
+  const token = opts.token ?? null;
+  app.use(authGuard(token));
+  // Behind the guard on purpose: logging out is something a signed-in person does, and a route
+  // in front of it would let any page on the internet drop someone's session for them.
+  app.post("/api/auth/logout", (_req, res) => {
+    clearAuthCookies(res);
+    res.redirect(303, "/");
+  });
   app.use(express.static(webRoot));
 
   const wrap =
@@ -148,6 +161,8 @@ export function createApp(opts: AppOptions) {
       defaultCwd: opts.defaultCwd,
       starterPrompt: opts.starterPrompt,
       permissionMode,
+      // Whether there is a session to end, which is the only thing the client does with it.
+      auth: token !== null,
       template: NEW_AGENT_TEMPLATE,
       templates: { agent: NEW_AGENT_TEMPLATE, skill: NEW_SKILL_TEMPLATE },
     });

@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import open from "open";
 import { ClaudeCli, TESTED_CLI_MAJOR, execRunner, parseCliVersion } from "./claude/claudeCli.ts";
-import { ConfigError, USAGE, hostForUrl, isLoopback, loadConfig, parseArgs } from "./config.ts";
+import { type AppConfig, ConfigError, USAGE, hostForUrl, isLoopback, loadConfig, parseArgs } from "./config.ts";
 import type { TaskQueue } from "./domain/queue.ts";
 import type { Scheduler } from "./domain/schedules.ts";
 import { createApp } from "./server.ts";
@@ -146,6 +146,36 @@ export function describeListenError(err: NodeJS.ErrnoException, port: number, ho
   return err.message;
 }
 
+/**
+ * What to say about authentication at startup, as a block for stderr. Empty when there is nothing
+ * worth saying — loopback with no token is the default and needs no sentence.
+ *
+ * A generated token exists nowhere else, so this is the only place it can be learned; that is why
+ * it is printed in full, and why the note says how to stop it changing every restart. A token the
+ * user chose is never echoed: it is already written down somewhere they control, and a service
+ * running under launchd or systemd sends this straight into a world-readable log file.
+ */
+export function describeAuth(config: Pick<AppConfig, "host" | "token" | "tokenGenerated" | "dataDir">, url: string) {
+  if (config.token === null) {
+    // Said once, at the moment it becomes true: bound anywhere but loopback, every device that
+    // can reach this address can drive a UI that starts Claude Code sessions, and `--no-auth`
+    // is the only way to be here.
+    if (isLoopback(config.host)) return "";
+    return (
+      `Note: ${config.host} is reachable from other devices on that network and authentication is\n` +
+      `off, so anyone who can reach it can run agents as you. Drop --no-auth, or use --host 127.0.0.1\n` +
+      `with an SSH tunnel.\n`
+    );
+  }
+  if (!config.tokenGenerated) return `Authentication is on. Open the URL and enter your token.\n`;
+  return (
+    `Authentication is on and this run generated a token. Open this once and the browser stays\n` +
+    `signed in for 7 days:\n\n  ${url}\n\n` +
+    `A generated token is new every restart. To keep one, set "token" in\n` +
+    `${path.join(config.dataDir, "config.json")} or pass --token.\n`
+  );
+}
+
 /** Starts the server and resolves once it is listening; returns undefined for --help and --version. */
 export async function main(argv = process.argv.slice(2)): Promise<Server | undefined> {
   const flags = parseArgs(argv);
@@ -190,6 +220,7 @@ export async function main(argv = process.argv.slice(2)): Promise<Server | undef
     starterPrompt: config.starterPrompt,
     defaultCwd: config.defaultCwd,
     permissionMode: config.permissionMode,
+    token: config.token,
     dataDir: config.dataDir,
     historyLimit: config.historyLimit,
     concurrency: config.concurrency,
@@ -242,16 +273,11 @@ export async function main(argv = process.argv.slice(2)): Promise<Server | undef
   boundPort = typeof address === "object" && address ? address.port : config.port;
   const url = `http://${hostForUrl(config.host)}:${boundPort}`;
   process.stdout.write(`Claude Agent UI: ${url}\n`);
-  // Said once, at the moment it becomes true: bound anywhere but loopback, every device that can
-  // reach this address can drive the UI, and the UI starts Claude Code sessions. There is no
-  // login in front of it.
-  if (!isLoopback(config.host)) {
-    process.stderr.write(
-      `Note: ${config.host} is reachable from other devices on that network, and this UI has no\n` +
-        `authentication. Keep it on a network you trust, or use --host 127.0.0.1 with an SSH tunnel.\n`,
-    );
-  }
-  if (flags.open ?? true) openBrowser(url);
+  // The URL stdout carries stays plain, so `claude-agent-ui > url.txt` never writes the token to
+  // a file. The sign-in link goes to stderr, next to everything else a person is meant to read.
+  const signInUrl = config.token ? `${url}/?token=${encodeURIComponent(config.token)}` : url;
+  process.stderr.write(describeAuth(config, signInUrl));
+  if (flags.open ?? true) openBrowser(signInUrl);
 
   server.on("error", (err: Error) => {
     process.stderr.write(`${err.message}\n`);

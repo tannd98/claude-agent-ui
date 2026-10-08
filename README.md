@@ -14,7 +14,7 @@ npx claude-agent-ui
 
 That is the whole setup. It prints a URL, opens <http://127.0.0.1:3000> in your browser, and
 creates `~/.claude-agent-ui/` the first time it runs. There is no config file to write, no account,
-and nothing to sign in to.
+and on loopback nothing to sign in to.
 
 What you get:
 
@@ -27,7 +27,7 @@ Press Ctrl-C to stop it. Nothing is left running.
 
 ## Security
 
-This runs agents on your machine with your files. Three things are worth knowing before you do.
+This runs agents on your machine with your files. Four things are worth knowing before you do.
 
 ### Permission mode: `ask` by default
 
@@ -70,9 +70,6 @@ interface attaches a UI that starts Claude Code sessions to whatever network the
 to be on — a café Wi-Fi included — without you ever naming it. Naming the address keeps that a
 choice.
 
-**There is no login.** On a non-loopback address, anyone who can reach that address can run agents
-as you, and the CLI says so at startup. Use it on a network you trust.
-
 Every route is behind a guard that checks `Host` and `Origin`, so a web page you happen to have
 open cannot drive the server by resolving its own hostname to the address you bound. The guard
 accepts the bound address and the loopback names; a DNS name of your own that points at the same
@@ -85,8 +82,52 @@ over SSH:
 ssh -L 3000:127.0.0.1:3000 you@that-machine
 ```
 
-That keeps the authentication and the encryption in SSH, where they belong, instead of in an app
-that has none of either.
+That keeps the encryption in SSH, where it belongs. This app has no TLS of its own, and a token
+sent over plain HTTP is readable by anything on the path.
+
+### Authentication: a token, on by default off loopback
+
+There is one token and no accounts. What it protects has exactly one answer — "can you start
+Claude Code sessions as me" — and a user table would add a password store and a reset flow to
+answer it.
+
+It follows the address unless you say otherwise:
+
+| Bound to              | Authentication                                         |
+| --------------------- | ------------------------------------------------------ |
+| `127.0.0.1` (default) | **Off.** Only this machine can connect anyway.         |
+| anything else         | **On**, with a token generated and printed at startup. |
+
+So `npx claude-agent-ui` is unchanged — a URL and nothing to sign in to — and `--host 192.168.1.42`
+prints a link like this instead:
+
+```
+Claude Agent UI: http://192.168.1.42:3000
+Authentication is on and this run generated a token. Open this once and the browser stays
+signed in for 7 days:
+
+  http://192.168.1.42:3000/?token=rX3mQ8sT_dK2pL9vN4wF6yBz
+```
+
+Open that link on the phone or laptop you want to use it from and that browser is signed in. The
+token moves straight into an `HttpOnly` cookie and is redirected out of the address bar, so it is
+not left where a screenshot or a pasted URL picks it up. Anything scripted sends it as a header:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" http://192.168.1.42:3000/api/tasks
+```
+
+**A generated token is new on every restart.** To keep one, name it — in `--token`, in
+`CLAUDE_AGENT_UI_TOKEN`, or as `"token"` in `~/.claude-agent-ui/config.json`. Naming a token also
+turns authentication on wherever you are bound, including loopback. A named token is never echoed
+back at startup: you already have it, and that line would otherwise land in a service's log file.
+
+`--auth` turns it on over loopback without naming a token. `--no-auth` turns it off, and on a
+non-loopback address the CLI says plainly what that means.
+
+What the token is not: it is not a password you should reuse, and over plain HTTP it is not secret
+from anything sitting on the network between the two devices. On a LAN you control that is the
+trade this is built for; across the internet, use the SSH tunnel above instead.
 
 ### No telemetry
 
@@ -113,7 +154,7 @@ npm install -g claude-agent-ui
 command -v claude-agent-ui    # the path the service will run
 ```
 
-Two details decide whether this works:
+Three details decide whether this works:
 
 - **`PATH`.** launchd and systemd both hand a service a minimal `PATH` that does not include
   nvm, Homebrew or `~/.local/bin`. If `claude` is not on it, the server refuses to start and says
@@ -121,6 +162,10 @@ Two details decide whether this works:
 - **One server at a time.** The service holds a lock on the data directory. With it running,
   `npx claude-agent-ui` will exit and tell you which PID has it — that is correct, not a fault.
   Just open <http://127.0.0.1:3000>.
+- **Name the token, if the service binds a LAN address.** A generated one changes every restart,
+  and a service restarts without you watching. Put `"token"` in `~/.claude-agent-ui/config.json`
+  rather than in the plist or the unit file: both of those are world-readable, and so is the log
+  a generated token would otherwise be printed into.
 
 ### macOS — launchd
 
@@ -221,6 +266,8 @@ setting that makes it both unattended and safe.
 --max-attempts <n>      Attempts per task, 1 = retries off (default 1)
 --history-limit <n>     Stored history entries (default 500)
 --permission-mode <m>   "ask" (default) or "bypassPermissions"
+--token <value>         Token the UI asks for (at least 8 characters); turns authentication on
+--auth, --no-auth       Force authentication on or off, whatever the address says
 --no-open               Do not open the UI in your browser (it opens by default)
 -h, --help              Show this help
 -v, --version           Show the version

@@ -1,6 +1,7 @@
-import { Bot, CalendarClock, ListChecks, Sparkles } from "lucide-react";
+import { Bot, CalendarClock, ListChecks, LogOut, Sparkles } from "lucide-react";
 import type * as React from "react";
 import { NavLink } from "react-router-dom";
+import { isSignedIn } from "../lib/api.ts";
 import { cn } from "../lib/utils.ts";
 import { ThemeToggle } from "./ThemeToggle.tsx";
 
@@ -83,7 +84,37 @@ export function Sidebar() {
 
       <div className="border-t border-[var(--sidebar-border)] p-2">
         <ThemeToggle />
+        <SignOut />
       </div>
     </nav>
+  );
+}
+
+/**
+ * Ends this browser's session, on the servers that have one. Absent otherwise: on loopback with
+ * no token there is nothing to sign out of, and a dead button is worse than no button.
+ *
+ * A real form rather than a fetch, so it works the same way the sign-in page does and leaves the
+ * browser on whatever the server decides to serve next.
+ */
+function SignOut() {
+  if (!isSignedIn()) return null;
+  return (
+    <form method="post" action="/api/auth/logout" className="mt-1">
+      <button
+        type="submit"
+        title="Sign out — this browser will be asked for the token again"
+        className={cn(
+          "flex h-[var(--sidebar-item-height)] w-full items-center gap-2.5",
+          "rounded-[var(--radius-md)] pl-3 pr-2 text-sm",
+          "max-md:justify-center max-md:px-0",
+          "text-[var(--sidebar-item-fg)] transition-colors duration-[var(--duration-fast)]",
+          "hover:bg-[var(--sidebar-item-bg-hover)] hover:text-[var(--sidebar-item-fg-hover)]",
+        )}
+      >
+        <LogOut className="size-4 shrink-0" aria-hidden="true" />
+        <span className="max-md:hidden">Sign out</span>
+      </button>
+    </form>
   );
 }
