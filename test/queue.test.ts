@@ -157,6 +157,26 @@ async function touchTranscript(home: string, sessionId: string, at: number): Pro
   await utimes(file, when, when);
 }
 
+/**
+ * How far after the block a test dates a transcript that is meant to read as "written since".
+ *
+ * One millisecond is finer than the stamp survives. utimes() takes a Date and the platform stores
+ * seconds, so on Node 20 and 22 a stamp of T reads back from stat() as T - 0.001ms, which
+ * `movedOn` floors to T - 1 — a step of 1 would land on the block itself and never look newer.
+ * Node 24 round-trips it exactly, which is why this only ever failed on CI. A few milliseconds is
+ * wider than that rounding and still inside the window a real answer lands in.
+ */
+const SINCE_BLOCK = 5;
+
+/**
+ * Waits for the clock to pass `stamp`, because `movedOn` ignores a transcript dated in the
+ * future — correctly, see the test below — and in a test the stamp is only a few milliseconds
+ * old to begin with.
+ */
+async function clockPast(stamp: number): Promise<void> {
+  while (Date.now() <= stamp) await new Promise((resolve) => setTimeout(resolve, 1));
+}
+
 const taskIds = (events: BusEvent[], type: string) =>
   events.filter((e) => e.type === type).map((e) => (e.data as { taskId: string }).taskId);
 
@@ -333,7 +353,8 @@ test("a block answered and finished inside one poll is picked up from the transc
   // "no, stop" — read, answered and over before the next poll, so the session is idle on both
   // sides of it and never once looks busy from here. The grown transcript is the only witness.
   await writeTranscript(home, "run1-session", "Left it alone, as you asked.");
-  await touchTranscript(home, "run1-session", blocked.finishedAt! + 1);
+  await touchTranscript(home, "run1-session", blocked.finishedAt! + SINCE_BLOCK);
+  await clockPast(blocked.finishedAt! + SINCE_BLOCK);
   await queue.tick();
   assert.equal((await view(queue, created.id)).state, "running");
 
@@ -353,7 +374,8 @@ test("an answer that only asks the next question settles blocked again and stays
 
   const blocked = await view(queue, created.id);
   await writeTranscript(home, "run1-session", "BLOCKED: and which remote?");
-  await touchTranscript(home, "run1-session", blocked.finishedAt! + 1);
+  await touchTranscript(home, "run1-session", blocked.finishedAt! + SINCE_BLOCK);
+  await clockPast(blocked.finishedAt! + SINCE_BLOCK);
   await queue.tick();
   await queue.tick();
   const task = await view(queue, created.id);
